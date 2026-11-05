@@ -1,5 +1,5 @@
-# Disabled workflow candidate. Keep both job gates unconditionally false.
-# Do not dispatch or remove a gate without separate authorization and review.
+# Validation-only activation candidate. Keep rehearsal unconditionally disabled.
+# Do not dispatch validation without separate authorization and review.
 name: Proposed V0001 PostgreSQL 17.11 rehearsal
 
 on:
@@ -15,8 +15,8 @@ permissions:
 
 jobs:
   validate:
-    # Fail-closed draft gate. Removing false requires separate approval.
-    if: ${{ false && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}
+    # Validation-only activation; retain the main and reviewed-commit checks.
+    if: ${{ github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
