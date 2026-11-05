@@ -141,6 +141,10 @@ public sealed class RehearsalPolicyTests
             "# Fail-closed draft gate. Removing false requires separate approval.";
         const string activeValidationComment =
             "# Validation-only activation; retain the main and reviewed-commit checks.";
+        const string oldCheckoutPin = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
+        const string newCheckoutPin = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
+        const string oldSetupDotnetPin = "actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9";
+        const string newSetupDotnetPin = "actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73";
 
         Assert.StartsWith(activeHeader, activeCandidate, StringComparison.Ordinal);
         var proposedBody = proposal[proposalHeader.Length..];
@@ -148,7 +152,9 @@ public sealed class RehearsalPolicyTests
         Assert.Equal(
             proposedBody
                 .Replace(proposedValidationComment, activeValidationComment, StringComparison.Ordinal)
-                .Replace(disabledValidationCondition, enabledValidationCondition, StringComparison.Ordinal),
+                .Replace(disabledValidationCondition, enabledValidationCondition, StringComparison.Ordinal)
+                .Replace(oldCheckoutPin, newCheckoutPin, StringComparison.Ordinal)
+                .Replace(oldSetupDotnetPin, newSetupDotnetPin, StringComparison.Ordinal),
             activeCandidate[activeHeader.Length..]);
         Assert.Contains(enabledValidationCondition, activeCandidate, StringComparison.Ordinal);
         Assert.Equal(1, activeCandidate.Split("if: ${{ false &&", StringSplitOptions.None).Length - 1);
@@ -192,6 +198,30 @@ public sealed class RehearsalPolicyTests
         Assert.Contains(
             "dotnet test tests/VirtuousGateway.MigrationValidation.Tests/VirtuousGateway.MigrationValidation.Tests.csproj",
             validation,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CheckedInWorkflowUsesNode24ActionsAndPreservesRehearsalContainer()
+    {
+        var workflow = ReadActiveWorkflow();
+
+        Assert.Equal(
+            2,
+            workflow.Split("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", StringSplitOptions.None).Length - 1);
+        Assert.Equal(
+            2,
+            workflow.Split("actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9", workflow, StringComparison.Ordinal);
+        Assert.Contains(
+            "node:20-bookworm@sha256:cacf10e99285cbbc891452e31249c1b5ec3ba225f40028fae946b75aeaf1b66a",
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains("test \"$(node --version | cut -d. -f1)\" = \"v20\"", workflow, StringComparison.Ordinal);
+        Assert.Contains(
+            "if: ${{ false && needs.validate.result == 'success' && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}",
+            workflow,
             StringComparison.Ordinal);
     }
 
