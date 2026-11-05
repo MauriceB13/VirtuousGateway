@@ -125,23 +125,74 @@ public sealed class RehearsalPolicyTests
     }
 
     [Fact]
-    public void CheckedInWorkflowMatchesProposalAndKeepsBothJobsDisabled()
+    public void CheckedInWorkflowDiffersOnlyByValidationGateFromDisabledProposal()
     {
         var proposal = ReadWorkflow();
         var activeCandidate = ReadActiveWorkflow();
         const string proposalHeader =
             "# PROPOSED ONLY. Keep outside .github/workflows.\n# Do not remove the disabled gate or execute without separate authorization.\n";
         const string activeHeader =
-            "# Disabled workflow candidate. Keep both job gates unconditionally false.\n# Do not dispatch or remove a gate without separate authorization and review.\n";
+            "# Validation-only activation candidate. Keep rehearsal unconditionally disabled.\n# Do not dispatch validation without separate authorization and review.\n";
+        const string disabledValidationCondition =
+            "if: ${{ false && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}";
+        const string enabledValidationCondition =
+            "if: ${{ github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}";
+        const string proposedValidationComment =
+            "# Fail-closed draft gate. Removing false requires separate approval.";
+        const string activeValidationComment =
+            "# Validation-only activation; retain the main and reviewed-commit checks.";
 
         Assert.StartsWith(activeHeader, activeCandidate, StringComparison.Ordinal);
+        var proposedBody = proposal[proposalHeader.Length..];
+        Assert.Equal(1, proposedBody.Split(disabledValidationCondition, StringSplitOptions.None).Length - 1);
         Assert.Equal(
-            proposal[proposalHeader.Length..],
+            proposedBody
+                .Replace(proposedValidationComment, activeValidationComment, StringComparison.Ordinal)
+                .Replace(disabledValidationCondition, enabledValidationCondition, StringComparison.Ordinal),
             activeCandidate[activeHeader.Length..]);
-        Assert.Equal(2, activeCandidate.Split("if: ${{ false &&", StringSplitOptions.None).Length - 1);
+        Assert.Contains(enabledValidationCondition, activeCandidate, StringComparison.Ordinal);
+        Assert.Equal(1, activeCandidate.Split("if: ${{ false &&", StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "if: ${{ false && needs.validate.result == 'success' && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}",
+            activeCandidate,
+            StringComparison.Ordinal);
         Assert.Contains("workflow_dispatch:", activeCandidate, StringComparison.Ordinal);
         Assert.DoesNotContain("pull_request:", activeCandidate, StringComparison.Ordinal);
         Assert.DoesNotContain("push:", activeCandidate, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidationOnlyWorkflowIsReviewedMainCommitRestrictedAndReadOnly()
+    {
+        var workflow = ReadActiveWorkflow();
+        var validation = GetJobBlock(workflow, "validate", "rehearsal");
+
+        Assert.Contains(
+            "if: ${{ github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}",
+            validation,
+            StringComparison.Ordinal);
+        Assert.Contains("permissions:\n  contents: read", workflow, StringComparison.Ordinal);
+        Assert.Contains("    permissions:\n      contents: read", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("permissions:\n  contents: write", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("permissions:\n  id-token:", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidationJobCannotStartDatabaseServiceOrExecuteMigration()
+    {
+        var validation = GetJobBlock(ReadActiveWorkflow(), "validate", "rehearsal");
+
+        Assert.DoesNotContain("services:", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("postgres:", validation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("docker", validation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Npgsql", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("DATABASE_URL", validation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PGHOST", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet run", validation, StringComparison.Ordinal);
+        Assert.Contains(
+            "dotnet test tests/VirtuousGateway.MigrationValidation.Tests/VirtuousGateway.MigrationValidation.Tests.csproj",
+            validation,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -265,6 +316,14 @@ public sealed class RehearsalPolicyTests
 
     private static string Hash(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private static string GetJobBlock(string workflow, string jobName, string nextJobName)
+    {
+        var start = workflow.IndexOf($"  {jobName}:\n", StringComparison.Ordinal);
+        var end = workflow.IndexOf($"  {nextJobName}:\n", start + 1, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, $"Could not locate workflow jobs '{jobName}' and '{nextJobName}'.");
+        return workflow[start..end];
+    }
 
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "workflow", "step9b216-proposal.yml"))

@@ -2,10 +2,11 @@
 
 ## Status
 
-Procedure only. The Step 9B.219 pull-request candidate is under
-`.github/workflows/v0001-postgres-rehearsal.yml`; both jobs retain their
-unconditional `false` gates. This document does not authorize removal of a
-gate, dispatch, PostgreSQL execution, or production migration.
+Procedure only. The merged workflow is
+`.github/workflows/v0001-postgres-rehearsal.yml`. Activation is staged: the
+first change may enable offline validation only, while the rehearsal job stays
+unconditionally disabled. Neither this procedure nor validation activation
+authorizes a dispatch, PostgreSQL execution, or production migration.
 
 ## Pre-activation administrator checks
 
@@ -27,43 +28,57 @@ read-only evidence that:
 Do not disclose secret values. If any control cannot be verified or differs
 from the expected configuration, stop; do not activate or dispatch.
 
-## Reviewed merge and activation
+## Staged activation
 
-1. Review the Step 9B.219 pull request that places
-   `step9b216-v0001-postgres-rehearsal.workflow.yml` at
-   `.github/workflows/v0001-postgres-rehearsal.yml`. Preserve both disabled
-   `false &&` job conditions, the dispatch-only trigger, protected Environment,
-   `main` and reviewed-commit checks, read-only permissions, pinned image and
-   action references, and absence of ports, volumes, endpoint inputs, and
-   production credentials. Review the complete diff and obtain the
-   independently required branch approval. Do not dispatch this inert version.
-2. Obtain a separate explicit authorization to remove the two `false &&`
-   clauses. Make only that activation change in a separately reviewed pull
-   request. Preserve all remaining conditions and controls. Do not combine
-   this with unrelated code or configuration changes.
-3. After the activation pull request is merged to `main`, record the full
-   40-character SHA of the exact resulting `main` commit containing the
-   reviewed workflow and harness. Verify it is the intended commit and still
-   contains the reviewed V0001 SQL and manifest hashes before dispatch. This
-   SHA is the `reviewed_commit` input; select `main` as the dispatch branch.
-   This verification is not authorization to dispatch.
-4. Before any dispatch, obtain separate, run-specific authorization that
-   explicitly covers starting the offline validation job and, if validation
-   succeeds, requesting the rehearsal Environment deployment. A maintainer
-   then dispatches with that exact SHA. Do not dispatch from another branch or
-   use a different SHA. The offline validation job must pass first.
-   `RayMCI` (not the initiator) independently checks the run, selected branch,
-   commit SHA, workflow diff, and validation result, then separately approves
-   the protected Environment. Environment approval is an additional gate, not
-   a substitute for run-specific authorization. If any detail is unexpected,
-   reject the Environment deployment and stop.
-5. Before approval, verify from the reviewed workflow that the rehearsal job
-   uses `ubuntu-24.04`, the pinned Node job image and PostgreSQL 17.11 service
-   image, fixed service alias `postgres`, no published ports or persistent
-   volumes, and only the synthetic bootstrap password. The harness must use
-   its fixed database and role names; it must not accept an endpoint,
-   connection-string, or SQL-path override. Do not add credentials or change
-   the service target to address a failure.
+1. **Validation-only pull request:** Obtain separate explicit authorization to
+   prepare a validation-only activation. Remove only the `false &&` from the
+   `validate` job condition in
+   `.github/workflows/v0001-postgres-rehearsal.yml`. Preserve its `main`
+   restriction and exact `inputs.reviewed_commit == github.sha` check. Leave
+   the rehearsal job condition, including its leading `false &&`, completely
+   unchanged. The validation job must remain limited to the offline migration
+   validation test and must not reference an Environment, service container,
+   database, Docker, or migration execution. Include the focused offline safety
+   tests, review the entire diff, and obtain independent pull-request approval.
+   Do not combine this change with rehearsal activation or unrelated changes.
+2. **Validation dispatch authorization:** After the validation-only PR is
+   independently approved and merged to `main`, record the full 40-character
+   SHA of the intended `main` commit. Verify the reviewed workflow and the
+   fixed V0001 SQL and manifest hashes at that commit. Before dispatching,
+   obtain separate, explicit, run-specific authorization for the offline
+   validation run. Select `main` and provide that exact SHA. This authorization
+   covers validation only; it does not authorize a rehearsal or database job.
+3. **Review validation results:** Verify that the run used the intended
+   `main` commit and that the offline validation job passed. Review its logs
+   for unexpected steps, targets, credentials, or database/network activity.
+   Preserve the run URL, commit SHA, result, and relevant logs. Stop if anything
+   is unexpected; do not enable or dispatch rehearsal to investigate a failure.
+4. **Separate rehearsal activation review:** Only after reviewing successful
+   validation results, obtain new explicit authorization to prepare a distinct
+   rehearsal-activation PR. That PR may remove only the rehearsal job's
+   `false &&` gate; keep the validation condition, branch and commit checks,
+   `needs.validate` success requirement, Environment, permissions, pinned
+   dependencies, and fixed disposable target unchanged. Obtain independent
+   pull-request approval. This PR and its approval do not authorize a workflow
+   dispatch or database execution.
+5. **Separate rehearsal run authorization and Environment approval:** After
+   the rehearsal-activation PR is approved and merged, recheck all administrator
+   controls above and identify the exact reviewed `main` commit and artifact
+   hashes. Before any dispatch, obtain separate, run-specific authorization
+   explicitly covering both offline validation and, if it passes, a request
+   for the rehearsal Environment deployment. Dispatch only from `main` with
+   the exact commit SHA. Validation must pass first. `RayMCI`, not the
+   initiator, independently reviews the run, branch, SHA, workflow and
+   validation result, then separately approves the protected Environment.
+   Environment approval is an additional gate, not dispatch authorization. If
+   any detail is unexpected, reject the Environment deployment and stop.
+6. **Pre-approval configuration check:** Confirm the rehearsal job uses
+   `ubuntu-24.04`, the pinned Node job image and PostgreSQL 17.11 service image,
+   fixed service alias `postgres`, no published ports or persistent volumes,
+   and only the synthetic bootstrap password. The harness must use fixed
+   database and role names and accept no endpoint, connection-string, or
+   SQL-path override. Do not add credentials or change the service target to
+   address a failure.
 
 ## First-run observation and stop conditions
 
@@ -89,11 +104,11 @@ from the expected configuration, stop; do not activate or dispatch.
   workflow does not provide an independent host-level container-removal
   attestation. Do not claim cleanup was independently verified from ordinary
   step logs.
-- After the one authorized run completes, disable further rehearsal by
-  reverting the activation-only change through a reviewed pull request, or
-  have an authorized administrator disable the workflow. Verify the workflow
-  is no longer dispatchable before closing the review. Do not rerun without a
-  new explicit authorization.
+- After the one authorized rehearsal completes, disable further rehearsal by
+  reverting the rehearsal activation through a reviewed pull request, or have
+  an authorized administrator disable the workflow. Verify the rehearsal
+  cannot run again before closing the review. Do not rerun without new
+  explicit authorization.
 
 ## Limitations
 
