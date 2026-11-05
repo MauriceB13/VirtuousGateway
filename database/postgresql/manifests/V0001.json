@@ -1,0 +1,116 @@
+{
+    "manifest_schema_version":  1,
+    "migration_version":  "V0001",
+    "description":  "Add empty accounting operation, normalized receipt, and evidence tables",
+    "sql_file":  "migrations/V0001__add_accounting_operation_receipt_evidence.sql",
+    "sha256":  "c1eb364eaf13a1e5ee07bd04001c3bda936aa46e81d4f47e54ad52fe0a180227",
+    "file_format":  {
+                        "encoding":  "UTF-8 without BOM",
+                        "line_endings":  "LF",
+                        "final_newline":  true,
+                        "checksum_input":  "Exact SQL file bytes, including comments and whitespace"
+                    },
+    "postgresql_baseline":  {
+                                "major":  17,
+                                "scope":  "Disposable development/test baseline; deployed version must be independently verified"
+                            },
+    "schema":  "public",
+    "prerequisites":  [
+                          "Separate explicit execution authorization",
+                          "Independently attested target and dedicated migration credentials",
+                          "PostgreSQL 17 with UTF8 database encoding",
+                          "Verified public schema, ownership, search_path, and default privileges",
+                          "Existing public.virtuous_gift_processing table with gift_id bigint primary key",
+                          "No conflicting expected objects; do not infer schema from names alone",
+                          "Approved executor, durable version/checksum tracking, bounded migration lock, and legacy-writer maintenance barrier"
+                      ],
+    "transaction_mode":  {
+                             "mode":  "single_executor_owned_transaction",
+                             "transaction_wrapper_in_file":  false,
+                             "isolation":  "read_committed",
+                             "concurrent_index_builds":  false,
+                             "on_error":  "Rollback entire migration; do not continue or retry posting"
+                         },
+    "automatic_execution":  false,
+    "execution_status":  "unexecuted",
+    "expected_objects":  {
+                             "tables":  [
+                                            {
+                                                "name":  "public.accounting_operations",
+                                                "constraints":  [
+                                                                    "pk_accounting_operations",
+                                                                    "uq_accounting_operations_gift",
+                                                                    "uq_accounting_operations_binding",
+                                                                    "fk_accounting_operations_gift",
+                                                                    "ck_accounting_operations_uuid",
+                                                                    "ck_accounting_operations_initial_scope",
+                                                                    "ck_accounting_operations_source_record",
+                                                                    "ck_accounting_operations_destination",
+                                                                    "ck_accounting_operations_source_org",
+                                                                    "ck_accounting_operations_origin",
+                                                                    "ck_accounting_operations_created"
+                                                                ]
+                                            },
+                                            {
+                                                "name":  "public.accounting_receipts",
+                                                "constraints":  [
+                                                                    "pk_accounting_receipts",
+                                                                    "uq_accounting_receipts_operation",
+                                                                    "uq_accounting_receipts_external",
+                                                                    "fk_accounting_receipts_operation",
+                                                                    "fk_accounting_receipts_binding",
+                                                                    "ck_accounting_receipts_uuids",
+                                                                    "ck_accounting_receipts_version",
+                                                                    "ck_accounting_receipts_initial_scope",
+                                                                    "ck_accounting_receipts_destination",
+                                                                    "ck_accounting_receipts_aplos_id",
+                                                                    "ck_accounting_receipts_evidence_reference",
+                                                                    "ck_accounting_receipts_verifier_reference",
+                                                                    "ck_accounting_receipts_recorded",
+                                                                    "ck_accounting_receipts_observed",
+                                                                    "ck_accounting_receipts_provenance"
+                                                                ]
+                                            },
+                                            {
+                                                "name":  "public.accounting_operation_evidence",
+                                                "constraints":  [
+                                                                    "pk_accounting_operation_evidence",
+                                                                    "uq_accounting_evidence_event_slot",
+                                                                    "fk_accounting_evidence_operation",
+                                                                    "ck_accounting_evidence_uuids",
+                                                                    "ck_accounting_evidence_version",
+                                                                    "ck_accounting_evidence_kind",
+                                                                    "ck_accounting_evidence_attempt",
+                                                                    "ck_accounting_evidence_reason",
+                                                                    "ck_accounting_evidence_candidates",
+                                                                    "ck_accounting_evidence_candidate_type",
+                                                                    "ck_accounting_evidence_candidate_id",
+                                                                    "ck_accounting_evidence_reference",
+                                                                    "ck_accounting_evidence_verifier_reference",
+                                                                    "ck_accounting_evidence_required_reference",
+                                                                    "ck_accounting_evidence_verifier",
+                                                                    "ck_accounting_evidence_recorded"
+                                                                ]
+                                            }
+                                        ],
+                             "explicit_indexes":  [
+                                                      "public.uq_accounting_evidence_disposition",
+                                                      "public.uq_accounting_evidence_manual_resolution",
+                                                      "public.uq_accounting_evidence_success",
+                                                      "public.ix_accounting_evidence_operation_recorded"
+                                                  ],
+                             "constraint_backing_indexes":  "Primary-key and unique constraints create their own indexes; no extra tables or user-defined triggers"
+                         },
+    "excluded":  [
+                     "backfill",
+                     "data changes",
+                     "legacy schema changes",
+                     "user-defined triggers",
+                     "procedures/functions",
+                     "roles or privilege changes",
+                     "migration history table",
+                     "runtime integration"
+                 ],
+    "static_review_only":  true,
+    "database_execution_or_parsing_performed":  false
+}

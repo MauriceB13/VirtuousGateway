@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <InternalsVisibleTo Include="VirtuousGateway.MigrationRehearsal.Tests" />
+    <None Include="..\..\database\postgresql\migrations\V0001__add_accounting_operation_receipt_evidence.sql"
+          Link="artifacts\V0001.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\database\postgresql\manifests\V0001.json"
+          Link="artifacts\V0001.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

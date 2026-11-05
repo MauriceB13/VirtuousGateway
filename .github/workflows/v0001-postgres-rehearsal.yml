@@ -1,0 +1,87 @@
+# Disabled workflow candidate. Keep both job gates unconditionally false.
+# Do not dispatch or remove a gate without separate authorization and review.
+name: Proposed V0001 PostgreSQL 17.11 rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: Exact reviewed main commit SHA; must equal the dispatched commit.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    # Fail-closed draft gate. Removing false requires separate approval.
+    if: ${{ false && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the reviewed commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.reviewed_commit }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 8.0.427
+      - name: Validate migration artifacts offline
+        run: dotnet test tests/VirtuousGateway.MigrationValidation.Tests/VirtuousGateway.MigrationValidation.Tests.csproj --configuration Release
+  rehearsal:
+    needs: validate
+    # A separate false gate prevents accidental service creation or migration execution.
+    if: ${{ false && needs.validate.result == 'success' && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha }}
+    environment:
+      name: v0001-postgres-rehearsal
+    runs-on: ubuntu-24.04
+    container:
+      image: node:20-bookworm@sha256:cacf10e99285cbbc891452e31249c1b5ec3ba225f40028fae946b75aeaf1b66a
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17.11-bookworm@sha256:73bedc9eaa0121b92b9b26bb52e5141b3f6f37479c7ef913c0160455763ca80a
+        env:
+          POSTGRES_DB: vg_v0001_rehearsal
+          POSTGRES_USER: vg_rehearsal_bootstrap
+          POSTGRES_PASSWORD: v0001-disposable-bootstrap-password-only
+          POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+          POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U vg_rehearsal_bootstrap -d vg_v0001_rehearsal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Verify pinned job-container prerequisites
+        shell: sh
+        run: |
+          test "$(node --version | cut -d. -f1)" = "v20"
+          command -v git
+          command -v sh
+          command -v bash
+          command -v curl
+          command -v tar
+          command -v gzip
+          dpkg-query -W libicu72 libssl3 zlib1g libgcc-s1 libstdc++6
+      - name: Checkout the reviewed commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.reviewed_commit }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Install exact .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 8.0.427
+      - name: Run disposable PostgreSQL rollback rehearsal
+        env:
+          VG_REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
+          VG_BOOTSTRAP_PASSWORD: v0001-disposable-bootstrap-password-only
+        run: dotnet run --project tools/VirtuousGateway.CiMigrationRehearsal/VirtuousGateway.CiMigrationRehearsal.csproj --configuration Release --no-launch-profile
