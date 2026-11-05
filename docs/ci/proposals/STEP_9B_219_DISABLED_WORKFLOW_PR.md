@@ -27,6 +27,8 @@ migration.
 
 ## Intended changed-file scope
 
+- `.gitattributes` (preserves LF byte hashes for the pinned V0001 artifacts on
+  Windows checkouts)
 - `.github/workflows/v0001-postgres-rehearsal.yml`
 - `database/postgresql/migrations/V0001__add_accounting_operation_receipt_evidence.sql`
 - `database/postgresql/manifests/V0001.json`

@@ -1,0 +1,2 @@
+/database/postgresql/migrations/V0001__add_accounting_operation_receipt_evidence.sql text eol=lf
+/database/postgresql/manifests/V0001.json text eol=lf
