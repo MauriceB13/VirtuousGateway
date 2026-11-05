@@ -1,0 +1,54 @@
+# PROPOSED ONLY. This file is intentionally outside .github/workflows.
+# It is not a runnable/approved workflow. Do not copy it into .github/workflows
+# until the protected Environment, image digest, action SHA, and workflow review
+# prerequisites in the adjacent README are independently verified.
+name: Proposed V0001 PostgreSQL rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: Exact reviewed commit SHA; must equal the dispatched commit.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    # Permanent fail-closed draft gate. Removing false requires separate approval.
+    if: ${{ false && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && inputs.reviewed_commit == github.sha && vars.V0001_REHEARSAL_ENVIRONMENT_VERIFIED == 'administrator-reviewed-v1' }}
+    environment:
+      name: v0001-postgres-rehearsal
+    runs-on: ubuntu-24.04
+    # Pin an independently reviewed tool image so job and service share the
+    # private Actions container network without publishing PostgreSQL ports.
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:8.0@sha256:REVIEW_REQUIRED_JOB_CONTAINER_DIGEST
+    permissions:
+      contents: read
+    services:
+      postgres:
+        # Replace only with an independently authenticated immutable digest.
+        image: postgres:17-bookworm@sha256:REVIEW_REQUIRED
+        env:
+          POSTGRES_DB: vg_v0001_rehearsal
+          POSTGRES_USER: vg_rehearsal_bootstrap
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --auth-host=trust
+        options: >-
+          --health-cmd "pg_isready -U vg_rehearsal_bootstrap -d vg_v0001_rehearsal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@REVIEW_REQUIRED_FULL_COMMIT_SHA
+        with:
+          ref: ${{ inputs.reviewed_commit }}
+          persist-credentials: false
+      - name: Validate migration artifacts offline
+        run: dotnet test tests/VirtuousGateway.MigrationValidation.Tests/VirtuousGateway.MigrationValidation.Tests.csproj --configuration Release
+      - name: Run disposable PostgreSQL rollback rehearsal
+        run: dotnet run --project tools/VirtuousGateway.MigrationRehearsal/VirtuousGateway.MigrationRehearsal.csproj --configuration Release --no-launch-profile

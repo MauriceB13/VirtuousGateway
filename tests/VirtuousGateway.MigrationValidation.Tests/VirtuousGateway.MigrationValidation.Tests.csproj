@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <Using Include="Xunit" />
+    <None Include="..\..\database\postgresql\migrations\V0001__add_accounting_operation_receipt_evidence.sql"
+          Link="artifacts\V0001.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\database\postgresql\manifests\V0001.json"
+          Link="artifacts\V0001.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="expected-catalog-v0001.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\VirtuousGateway.sln"
+          Link="boundary\VirtuousGateway.sln" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\VirtuousGateway.Api\VirtuousGateway.Api.csproj"
+          Link="boundary\VirtuousGateway.Api.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\VirtuousGateway.Infrastructure\VirtuousGateway.Infrastructure.csproj"
+          Link="boundary\VirtuousGateway.Infrastructure.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\VirtuousGateway.Tests\VirtuousGateway.Tests.csproj"
+          Link="boundary\VirtuousGateway.Tests.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="VirtuousGateway.MigrationValidation.Tests.csproj"
+          Link="boundary\VirtuousGateway.MigrationValidation.Tests.csproj" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
