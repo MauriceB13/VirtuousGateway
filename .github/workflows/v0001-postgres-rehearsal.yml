@@ -22,13 +22,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout the reviewed commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.reviewed_commit }}
           fetch-depth: 1
           persist-credentials: false
       - name: Install exact .NET SDK
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 8.0.427
       - name: Validate migration artifacts offline
@@ -71,13 +71,13 @@ jobs:
           command -v gzip
           dpkg-query -W libicu72 libssl3 zlib1g libgcc-s1 libstdc++6
       - name: Checkout the reviewed commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.reviewed_commit }}
           fetch-depth: 1
           persist-credentials: false
       - name: Install exact .NET SDK
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 8.0.427
       - name: Run disposable PostgreSQL rollback rehearsal
