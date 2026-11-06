@@ -1,11 +1,17 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using VirtuousGateway.Core.Authentication;
 using VirtuousGateway.Core.Configuration;
 using VirtuousGateway.Infrastructure.Aplos;
 using Microsoft.Extensions.Options;
 using Xunit;
 using VirtuousGateway.Core.Aplos;
+using VirtuousGateway.Api.Extensions;
 
 namespace VirtuousGateway.Tests.Aplos;
 
@@ -37,7 +43,7 @@ public async Task PostAsync_AuthenticationFailure_ThrowsNotDispatched()
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -88,7 +94,7 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -160,7 +166,7 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                     "https://app.aplos.com/hermes/api/v1"
             });
 
-        var client = new AplosApiClient(
+        var client = CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -204,13 +210,101 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                     "https://app.aplos.com/hermes/api/v1"
             });
 
-        var client = new AplosApiClient(
+        var client = CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => client.GetAsync(""));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.Redirect)]
+    [InlineData(HttpStatusCode.SeeOther)]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.PermanentRedirect)]
+    public async Task PostAsync_RedirectResponseIsNotFollowed(
+        HttpStatusCode redirectStatus)
+    {
+        using var sourceListener =
+            new TcpListener(
+                IPAddress.Loopback,
+                0);
+        sourceListener.Start();
+
+        using var destinationListener =
+            new TcpListener(
+                IPAddress.Loopback,
+                0);
+        destinationListener.Start();
+
+        var sourceUri =
+            GetListenerUri(sourceListener);
+        var destinationUri =
+            GetListenerUri(destinationListener);
+        var redirectUri =
+            new Uri(destinationUri, "capture");
+
+        var sourceRequestTask =
+            CaptureRequestAndRedirectAsync(
+                sourceListener,
+                (int)redirectStatus,
+                redirectUri);
+
+        using var provider =
+            new ServiceCollection()
+                .AddGatewayServices(
+                    new ConfigurationBuilder().Build())
+                .BuildServiceProvider();
+
+        var clientFactory =
+            provider.GetRequiredService<IHttpClientFactory>();
+
+        using var unusedGetClient =
+            new HttpClient(
+                new StubHttpMessageHandler(
+                    _ =>
+                        throw new InvalidOperationException(
+                            "The GET client must not be used by transaction posting.")));
+
+        var apiClient =
+            new AplosApiClient(
+                unusedGetClient,
+                new StubAplosAuthenticationService(
+                    "test-access-token"),
+                Options.Create(
+                    new AplosOptions
+                    {
+                        BaseUrl =
+                            sourceUri.ToString().TrimEnd('/')
+                    }),
+                clientFactory);
+
+        var exception =
+            await Assert.ThrowsAsync<AplosPostRejectedException>(
+                () =>
+                    apiClient.PostAsync(
+                        "transactions",
+                        """{"note":"redirect test"}"""));
+
+        var sourceRequest =
+            await sourceRequestTask;
+
+        Assert.Equal(
+            redirectStatus,
+            exception.StatusCode);
+        Assert.Contains(
+            "POST /transactions ",
+            sourceRequest.Headers,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            """{"note":"redirect test"}""",
+            sourceRequest.Body);
+
+        await AssertNoRedirectConnectionAsync(
+            destinationListener);
     }
 
     [Fact]
@@ -279,7 +373,7 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                     "https://app.aplos.com/hermes/api/v1"
             });
 
-        var client = new AplosApiClient(
+        var client = CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -324,7 +418,7 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                     "https://app.aplos.com/hermes/api/v1"
             });
 
-        var client = new AplosApiClient(
+        var client = CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -335,8 +429,14 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                 ""));
     }
 
-    [Fact]
-public async Task PostAsync_BadRequest_ThrowsRejectedWithoutExposingResponseBody()
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+public async Task PostAsync_NonSuccessResponse_ThrowsRejectedWithoutExposingResponseBody(
+    HttpStatusCode statusCode)
 {
     const string sensitiveResponse =
         """
@@ -350,7 +450,7 @@ public async Task PostAsync_BadRequest_ThrowsRejectedWithoutExposingResponseBody
         new StubHttpMessageHandler(
             _ => Task.FromResult(
                 new HttpResponseMessage(
-                    HttpStatusCode.BadRequest)
+                    statusCode)
                 {
                     Content =
                         new StringContent(
@@ -373,7 +473,7 @@ public async Task PostAsync_BadRequest_ThrowsRejectedWithoutExposingResponseBody
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -386,11 +486,11 @@ public async Task PostAsync_BadRequest_ThrowsRejectedWithoutExposingResponseBody
                     """{"note":"test"}"""));
 
     Assert.Equal(
-        HttpStatusCode.BadRequest,
+        statusCode,
         exception.StatusCode);
 
     Assert.Contains(
-        "HTTP 400",
+        $"HTTP {(int)statusCode}",
         exception.Message,
         StringComparison.Ordinal);
 
@@ -405,14 +505,17 @@ public async Task PostAsync_BadRequest_ThrowsRejectedWithoutExposingResponseBody
         StringComparison.OrdinalIgnoreCase);
 }
 
-    [Fact]
-public async Task PostAsync_ServerError_ThrowsOutcomeUnknown()
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+public async Task PostAsync_ServerError_ThrowsOutcomeUnknown(
+    HttpStatusCode statusCode)
 {
     var handler =
         new StubHttpMessageHandler(
             _ => Task.FromResult(
                 new HttpResponseMessage(
-                    HttpStatusCode.InternalServerError)
+                    statusCode)
                 {
                     Content =
                         new StringContent(
@@ -435,7 +538,7 @@ public async Task PostAsync_ServerError_ThrowsOutcomeUnknown()
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -448,7 +551,7 @@ public async Task PostAsync_ServerError_ThrowsOutcomeUnknown()
                     """{"note":"test"}"""));
 
     Assert.Contains(
-        "HTTP 500",
+        $"HTTP {(int)statusCode}",
         exception.Message,
         StringComparison.Ordinal);
 
@@ -482,7 +585,7 @@ public async Task PostAsync_TransportFailure_ThrowsOutcomeUnknown()
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -526,7 +629,7 @@ public async Task PostAsync_CancellationDuringSend_ThrowsOutcomeUnknown()
             });
 
     var client =
-        new AplosApiClient(
+        CreateAplosApiClient(
             httpClient,
             authenticationService,
             options);
@@ -545,6 +648,189 @@ public async Task PostAsync_CancellationDuringSend_ThrowsOutcomeUnknown()
         1,
         handler.CallCount);
 }
+
+    private static AplosApiClient CreateAplosApiClient(
+        HttpClient httpClient,
+        IAplosAuthenticationService authenticationService,
+        IOptions<AplosOptions> options)
+    {
+        return new AplosApiClient(
+            httpClient,
+            authenticationService,
+            options,
+            new StubHttpClientFactory(httpClient));
+    }
+
+    private static Uri GetListenerUri(
+        TcpListener listener)
+    {
+        var endpoint =
+            (System.Net.IPEndPoint)listener.LocalEndpoint;
+
+        return new Uri(
+            $"http://127.0.0.1:{endpoint.Port}/");
+    }
+
+    private static async Task<CapturedHttpRequest>
+        CaptureRequestAndRedirectAsync(
+            TcpListener listener,
+            int statusCode,
+            Uri redirectUri)
+    {
+        using var cancellationSource =
+            new CancellationTokenSource(
+                TimeSpan.FromSeconds(10));
+
+        using var tcpClient =
+            await listener.AcceptTcpClientAsync(
+                cancellationSource.Token);
+
+        using var stream =
+            tcpClient.GetStream();
+
+        var headerBytes =
+            new List<byte>();
+        var oneByte =
+            new byte[1];
+
+        while (true)
+        {
+            var bytesRead =
+                await stream.ReadAsync(
+                    oneByte,
+                    cancellationSource.Token);
+
+            if (bytesRead == 0)
+            {
+                throw new EndOfStreamException(
+                    "The local HTTP request ended before its headers were complete.");
+            }
+
+            headerBytes.Add(oneByte[0]);
+
+            var count =
+                headerBytes.Count;
+
+            if (count >= 4
+                && headerBytes[count - 4] == 13
+                && headerBytes[count - 3] == 10
+                && headerBytes[count - 2] == 13
+                && headerBytes[count - 1] == 10)
+            {
+                break;
+            }
+        }
+
+        var headers =
+            Encoding.ASCII.GetString(
+                headerBytes.ToArray());
+
+        var contentLengthHeader =
+            headers
+                .Split(
+                    "\r\n",
+                    StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault(
+                    line =>
+                        line.StartsWith(
+                            "Content-Length:",
+                            StringComparison.OrdinalIgnoreCase));
+
+        var contentLength =
+            contentLengthHeader is null
+                ? 0
+                : int.Parse(
+                    contentLengthHeader[
+                        "Content-Length:".Length..].Trim());
+
+        var bodyBytes =
+            new byte[contentLength];
+
+        if (contentLength > 0)
+        {
+            await stream.ReadExactlyAsync(
+                bodyBytes,
+                cancellationSource.Token);
+        }
+
+        var response =
+            Encoding.ASCII.GetBytes(
+                $"HTTP/1.1 {statusCode} Redirect\r\n" +
+                $"Location: {redirectUri}\r\n" +
+                "Content-Length: 0\r\n" +
+                "Connection: close\r\n\r\n");
+
+        await stream.WriteAsync(
+            response,
+            cancellationSource.Token);
+        await stream.FlushAsync(
+            cancellationSource.Token);
+
+        return new CapturedHttpRequest(
+            headers,
+            Encoding.UTF8.GetString(bodyBytes));
+    }
+
+    private static async Task AssertNoRedirectConnectionAsync(
+        TcpListener listener)
+    {
+        using var timeoutSource =
+            new CancellationTokenSource();
+        var acceptTask =
+            listener.AcceptTcpClientAsync(
+                timeoutSource.Token).AsTask();
+        var timeoutTask =
+            Task.Delay(
+                TimeSpan.FromSeconds(1));
+
+        if (await Task.WhenAny(
+                acceptTask,
+                timeoutTask) == acceptTask)
+        {
+            using var unexpectedConnection =
+                await acceptTask;
+
+            throw new Xunit.Sdk.XunitException(
+                "The transaction POST unexpectedly connected to the redirect destination.");
+        }
+
+        timeoutSource.Cancel();
+
+        try
+        {
+            using var unexpectedConnection =
+                await acceptTask;
+
+            throw new Xunit.Sdk.XunitException(
+                "The transaction POST unexpectedly connected to the redirect destination.");
+        }
+        catch (OperationCanceledException exception)
+            when (exception.CancellationToken == timeoutSource.Token)
+        {
+        }
+    }
+
+    private sealed record CapturedHttpRequest(
+        string Headers,
+        string Body);
+
+    private sealed class StubHttpClientFactory
+        : IHttpClientFactory
+    {
+        private readonly HttpClient _httpClient;
+
+        public StubHttpClientFactory(
+            HttpClient httpClient)
+        {
+            _httpClient = httpClient;
+        }
+
+        public HttpClient CreateClient(
+            string name)
+        {
+            return _httpClient;
+        }
+    }
 
     private sealed class FailingHttpContent
     : HttpContent
