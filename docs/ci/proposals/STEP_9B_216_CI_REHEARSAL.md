@@ -26,8 +26,13 @@ outside separately authorized CI review.
 - The runner is GitHub-hosted `ubuntu-24.04`. The Node 20 Bookworm job
   container uses the verified Linux/amd64 official-image manifest digest. The
   full Debian Node image derives from `buildpack-deps`, providing Node 20,
-  `sh`, Git, and common SDK prerequisites. The pinned checkout and setup-dotnet
-  actions both declare the Node 20 runtime.
+  `sh`, Git, and common SDK prerequisites. The pinned `actions/checkout` and
+  `actions/setup-dotnet` revisions declare the Node.js 24 JavaScript runtime,
+  which is supplied by the GitHub Actions runner. The Node 20 job container
+  provides the shell environment; its Node.js 20 preflight check validates the
+  container's `node` executable, not the JavaScript action runtime. The
+  rehearsal job has not been executed, so this runtime behavior has not been
+  empirically confirmed in that job.
 - The service is official PostgreSQL 17.11 Bookworm pinned to the verified
   Linux/amd64 manifest digest. GitHub creates a fresh service container for
   each job and connects it to the job-container bridge network; the proposal
