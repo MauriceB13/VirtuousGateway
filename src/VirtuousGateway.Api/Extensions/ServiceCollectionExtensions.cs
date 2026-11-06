@@ -76,6 +76,16 @@ public static class ServiceCollectionExtensions
     IAplosApiClient,
     AplosApiClient>();
 
+    services
+        .AddHttpClient(
+            AplosApiClient.TransactionPostClientName)
+        .ConfigurePrimaryHttpMessageHandler(
+            () =>
+                new HttpClientHandler
+                {
+                    AllowAutoRedirect = false
+                });
+
     services.AddScoped<
     IAplosTransactionService,
     AplosTransactionService>();

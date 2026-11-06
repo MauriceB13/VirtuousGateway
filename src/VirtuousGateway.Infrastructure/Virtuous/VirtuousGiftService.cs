@@ -133,7 +133,7 @@ public sealed class VirtuousGiftService
         }
         catch (AplosPostRejectedException exception)
         {
-            await _processingLedger.FailAsync(
+            await _processingLedger.RequireReconciliationAsync(
                 gift.Id,
                 claim.Record.AttemptId,
                 exception.Message,

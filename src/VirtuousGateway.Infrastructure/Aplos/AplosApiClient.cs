@@ -3,24 +3,31 @@ using VirtuousGateway.Core.Aplos;
 using VirtuousGateway.Core.Authentication;
 using VirtuousGateway.Core.Configuration;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Http;
 using System.Text;
 
 namespace VirtuousGateway.Infrastructure.Aplos;
 
 public sealed class AplosApiClient : IAplosApiClient
 {
+    public const string TransactionPostClientName =
+        "AplosTransactionPost";
+
     private readonly HttpClient _httpClient;
     private readonly IAplosAuthenticationService _authenticationService;
     private readonly AplosOptions _options;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public AplosApiClient(
         HttpClient httpClient,
         IAplosAuthenticationService authenticationService,
-        IOptions<AplosOptions> options)
+        IOptions<AplosOptions> options,
+        IHttpClientFactory httpClientFactory)
     {
         _httpClient = httpClient;
         _authenticationService = authenticationService;
         _options = options.Value;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<string> GetAsync(
@@ -119,8 +126,12 @@ public sealed class AplosApiClient : IAplosApiClient
 
         try
         {
+            using var transactionHttpClient =
+                _httpClientFactory.CreateClient(
+                    TransactionPostClientName);
+
             response =
-            await _httpClient.SendAsync(
+            await transactionHttpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
