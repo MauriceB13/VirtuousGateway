@@ -240,8 +240,11 @@ public async Task ProcessGiftAsync_MappingFailure_MarksFailedAndDoesNotRetryDupl
         transactionService.CallCount);
 }
 
-   [Fact]
-public async Task ProcessGiftAsync_UnconfirmedSuccessfulResponse_RequiresReconciliationAndDoesNotRetryDuplicate()
+   [Theory]
+   [InlineData("{\"status\":200,\"data\":{\"transaction\":{}}}")]
+   [InlineData("not-json")]
+public async Task ProcessGiftAsync_UnconfirmedSuccessfulResponse_RequiresReconciliationAndBlocksRetries(
+    string response)
 {
     var transaction =
         new AplosTransactionRequest
@@ -254,15 +257,7 @@ public async Task ProcessGiftAsync_UnconfirmedSuccessfulResponse_RequiresReconci
 
     var transactionService =
         new StubTransactionService(
-            """
-            {
-              "status": 200,
-              "data": {
-                "transaction": {
-                }
-              }
-            }
-            """);
+            response);
 
     var processingLedger =
         new InMemoryVirtuousGiftProcessingLedger();
@@ -321,6 +316,20 @@ public async Task ProcessGiftAsync_UnconfirmedSuccessfulResponse_RequiresReconci
     Assert.Equal(
         gift.Id,
         duplicateException.GiftId);
+
+    Assert.Equal(
+        1,
+        transactionService.CallCount);
+
+    var retryException =
+        await Assert.ThrowsAsync<VirtuousGiftProcessingStateException>(
+            () =>
+                service.RetryFailedGiftAsync(
+                    gift));
+
+    Assert.Equal(
+        VirtuousGiftProcessingStatus.RequiresReconciliation,
+        retryException.Status);
 
     Assert.Equal(
         1,
@@ -403,13 +412,36 @@ public async Task ProcessGiftAsync_UnknownPostOutcome_RequiresReconciliationAndD
         1,
         transactionService.CallCount);
 
+    var retryException =
+        await Assert.ThrowsAsync<VirtuousGiftProcessingStateException>(
+            () =>
+                service.RetryFailedGiftAsync(
+                    gift));
+
+    Assert.Equal(
+        VirtuousGiftProcessingStatus.RequiresReconciliation,
+        retryException.Status);
+
+    Assert.Equal(
+        1,
+        transactionService.CallCount);
+
     Assert.Equal(
         1,
         mapper.CallCount);
 }
 
-    [Fact]
-public async Task ProcessGiftAsync_RejectedPost_MarksFailedAndDoesNotRetryDuplicate()
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.Redirect)]
+    [InlineData(HttpStatusCode.SeeOther)]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.PermanentRedirect)]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+public async Task ProcessGiftAsync_RejectedPost_RequiresReconciliationAndBlocksRetries(
+    HttpStatusCode statusCode)
 {
     var transaction =
         new AplosTransactionRequest
@@ -421,7 +453,7 @@ public async Task ProcessGiftAsync_RejectedPost_MarksFailedAndDoesNotRetryDuplic
         new StubMapper(transaction);
 
     var transactionService =
-        new RejectingTransactionService();
+        new RejectingTransactionService(statusCode);
 
     var processingLedger =
         new InMemoryVirtuousGiftProcessingLedger();
@@ -460,7 +492,7 @@ public async Task ProcessGiftAsync_RejectedPost_MarksFailedAndDoesNotRetryDuplic
                     gift));
 
     Assert.Equal(
-        HttpStatusCode.BadRequest,
+        statusCode,
         firstException.StatusCode);
 
     Assert.Equal(
@@ -474,12 +506,26 @@ public async Task ProcessGiftAsync_RejectedPost_MarksFailedAndDoesNotRetryDuplic
                     gift));
 
     Assert.Equal(
-        VirtuousGiftProcessingStatus.Failed,
+        VirtuousGiftProcessingStatus.RequiresReconciliation,
         duplicateException.Status);
 
     Assert.Equal(
         gift.Id,
         duplicateException.GiftId);
+
+    Assert.Equal(
+        1,
+        transactionService.CallCount);
+
+    var retryException =
+        await Assert.ThrowsAsync<VirtuousGiftProcessingStateException>(
+            () =>
+                service.RetryFailedGiftAsync(
+                    gift));
+
+    Assert.Equal(
+        VirtuousGiftProcessingStatus.RequiresReconciliation,
+        retryException.Status);
 
     Assert.Equal(
         1,
@@ -1298,6 +1344,14 @@ private sealed class NotDispatchedTransactionService
 private sealed class RejectingTransactionService
     : IAplosTransactionService
 {
+    private readonly HttpStatusCode _statusCode;
+
+    public RejectingTransactionService(
+        HttpStatusCode statusCode)
+    {
+        _statusCode = statusCode;
+    }
+
     public int CallCount { get; private set; }
 
     public Task<string> CreateTransactionAsync(
@@ -1308,7 +1362,7 @@ private sealed class RejectingTransactionService
 
         return Task.FromException<string>(
             new AplosPostRejectedException(
-                HttpStatusCode.BadRequest));
+                _statusCode));
     }
 }
 
