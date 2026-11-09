@@ -247,12 +247,6 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
         var redirectUri =
             new Uri(destinationUri, "capture");
 
-        var sourceRequestTask =
-            CaptureRequestAndRedirectAsync(
-                sourceListener,
-                (int)redirectStatus,
-                redirectUri);
-
         using var provider =
             new ServiceCollection()
                 .AddGatewayServices(
@@ -282,29 +276,93 @@ public async Task PostAsync_ResponseBodyReadFailure_ThrowsOutcomeUnknown()
                     }),
                 clientFactory);
 
-        var exception =
-            await Assert.ThrowsAsync<AplosPostRejectedException>(
-                () =>
-                    apiClient.PostAsync(
-                        "transactions",
-                        """{"note":"redirect test"}"""));
+        AplosPostRejectedException? exception = null;
+        using var sourceCancellationSource =
+            new CancellationTokenSource();
+        using var destinationTimeoutSource =
+            new CancellationTokenSource(
+                TimeSpan.FromSeconds(5));
+        var sourceRequestTask =
+            CaptureRequestAndRedirectAsync(
+                sourceListener,
+                (int)redirectStatus,
+                redirectUri,
+                sourceCancellationSource.Token);
+        var destinationRequestTask =
+            CaptureRedirectRequestAndRespondAsync(
+                destinationListener,
+                destinationTimeoutSource.Token);
 
-        var sourceRequest =
-            await sourceRequestTask;
+        using var postTimeoutSource =
+            new CancellationTokenSource(
+                TimeSpan.FromSeconds(5));
 
-        Assert.Equal(
-            redirectStatus,
-            exception.StatusCode);
-        Assert.Contains(
-            "POST /transactions ",
-            sourceRequest.Headers,
-            StringComparison.Ordinal);
-        Assert.Equal(
-            """{"note":"redirect test"}""",
-            sourceRequest.Body);
+        try
+        {
+            try
+            {
+                await apiClient.PostAsync(
+                    "transactions",
+                    """{"note":"redirect test"}""",
+                    postTimeoutSource.Token);
+            }
+            catch (AplosPostRejectedException rejectedException)
+            {
+                exception = rejectedException;
+            }
+            catch (AplosPostOutcomeUnknownException outcomeUnknownException)
+                when (postTimeoutSource.IsCancellationRequested
+                    && outcomeUnknownException.InnerException
+                        is OperationCanceledException cancellationException
+                    && cancellationException.CancellationToken
+                        == postTimeoutSource.Token)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    "The original transaction POST exceeded its five-second test timeout.",
+                    outcomeUnknownException);
+            }
 
-        await AssertNoRedirectConnectionAsync(
-            destinationListener);
+            var sourceRequest =
+                await sourceRequestTask;
+
+            destinationTimeoutSource.Cancel();
+            var destinationRequest =
+                await destinationRequestTask;
+
+            Assert.True(
+                destinationRequest is null,
+                $"The transaction POST unexpectedly connected to the redirect destination with request line '{destinationRequest?.RequestLine}'.");
+            Assert.NotNull(exception);
+            Assert.Equal(
+                redirectStatus,
+                exception!.StatusCode);
+            Assert.Contains(
+                "POST /transactions ",
+                sourceRequest.Headers,
+                StringComparison.Ordinal);
+            Assert.Equal(
+                """{"note":"redirect test"}""",
+                sourceRequest.Body);
+        }
+        finally
+        {
+            sourceCancellationSource.Cancel();
+            destinationTimeoutSource.Cancel();
+            sourceListener.Stop();
+            destinationListener.Stop();
+
+            try
+            {
+                await sourceRequestTask;
+            }
+            catch (OperationCanceledException cancellationException)
+                when (cancellationException.CancellationToken
+                    == sourceCancellationSource.Token)
+            {
+            }
+
+            await destinationRequestTask;
+        }
     }
 
     [Fact]
@@ -675,144 +733,208 @@ public async Task PostAsync_CancellationDuringSend_ThrowsOutcomeUnknown()
         CaptureRequestAndRedirectAsync(
             TcpListener listener,
             int statusCode,
-            Uri redirectUri)
+            Uri redirectUri,
+            CancellationToken cleanupToken)
     {
         using var cancellationSource =
-            new CancellationTokenSource(
-                TimeSpan.FromSeconds(10));
-
-        using var tcpClient =
-            await listener.AcceptTcpClientAsync(
-                cancellationSource.Token);
-
-        using var stream =
-            tcpClient.GetStream();
-
-        var headerBytes =
-            new List<byte>();
-        var oneByte =
-            new byte[1];
-
-        while (true)
-        {
-            var bytesRead =
-                await stream.ReadAsync(
-                    oneByte,
-                    cancellationSource.Token);
-
-            if (bytesRead == 0)
-            {
-                throw new EndOfStreamException(
-                    "The local HTTP request ended before its headers were complete.");
-            }
-
-            headerBytes.Add(oneByte[0]);
-
-            var count =
-                headerBytes.Count;
-
-            if (count >= 4
-                && headerBytes[count - 4] == 13
-                && headerBytes[count - 3] == 10
-                && headerBytes[count - 2] == 13
-                && headerBytes[count - 1] == 10)
-            {
-                break;
-            }
-        }
-
-        var headers =
-            Encoding.ASCII.GetString(
-                headerBytes.ToArray());
-
-        var contentLengthHeader =
-            headers
-                .Split(
-                    "\r\n",
-                    StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault(
-                    line =>
-                        line.StartsWith(
-                            "Content-Length:",
-                            StringComparison.OrdinalIgnoreCase));
-
-        var contentLength =
-            contentLengthHeader is null
-                ? 0
-                : int.Parse(
-                    contentLengthHeader[
-                        "Content-Length:".Length..].Trim());
-
-        var bodyBytes =
-            new byte[contentLength];
-
-        if (contentLength > 0)
-        {
-            await stream.ReadExactlyAsync(
-                bodyBytes,
-                cancellationSource.Token);
-        }
-
-        var response =
-            Encoding.ASCII.GetBytes(
-                $"HTTP/1.1 {statusCode} Redirect\r\n" +
-                $"Location: {redirectUri}\r\n" +
-                "Content-Length: 0\r\n" +
-                "Connection: close\r\n\r\n");
-
-        await stream.WriteAsync(
-            response,
-            cancellationSource.Token);
-        await stream.FlushAsync(
-            cancellationSource.Token);
-
-        return new CapturedHttpRequest(
-            headers,
-            Encoding.UTF8.GetString(bodyBytes));
-    }
-
-    private static async Task AssertNoRedirectConnectionAsync(
-        TcpListener listener)
-    {
-        using var timeoutSource =
-            new CancellationTokenSource();
-        var acceptTask =
-            listener.AcceptTcpClientAsync(
-                timeoutSource.Token).AsTask();
-        var timeoutTask =
-            Task.Delay(
-                TimeSpan.FromSeconds(1));
-
-        if (await Task.WhenAny(
-                acceptTask,
-                timeoutTask) == acceptTask)
-        {
-            using var unexpectedConnection =
-                await acceptTask;
-
-            throw new Xunit.Sdk.XunitException(
-                "The transaction POST unexpectedly connected to the redirect destination.");
-        }
-
-        timeoutSource.Cancel();
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cleanupToken);
+        cancellationSource.CancelAfter(
+            TimeSpan.FromSeconds(10));
 
         try
         {
-            using var unexpectedConnection =
-                await acceptTask;
+            using var tcpClient =
+                await listener.AcceptTcpClientAsync(
+                    cancellationSource.Token);
 
-            throw new Xunit.Sdk.XunitException(
-                "The transaction POST unexpectedly connected to the redirect destination.");
+            using var stream =
+                tcpClient.GetStream();
+
+            var headerBytes =
+                new List<byte>();
+            var oneByte =
+                new byte[1];
+
+            while (true)
+            {
+                var bytesRead =
+                    await stream.ReadAsync(
+                        oneByte,
+                        cancellationSource.Token);
+
+                if (bytesRead == 0)
+                {
+                    throw new EndOfStreamException(
+                        "The local HTTP request ended before its headers were complete.");
+                }
+
+                headerBytes.Add(oneByte[0]);
+
+                var count =
+                    headerBytes.Count;
+
+                if (count >= 4
+                    && headerBytes[count - 4] == 13
+                    && headerBytes[count - 3] == 10
+                    && headerBytes[count - 2] == 13
+                    && headerBytes[count - 1] == 10)
+                {
+                    break;
+                }
+            }
+
+            var headers =
+                Encoding.ASCII.GetString(
+                    headerBytes.ToArray());
+
+            var contentLengthHeader =
+                headers
+                    .Split(
+                        "\r\n",
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault(
+                        line =>
+                            line.StartsWith(
+                                "Content-Length:",
+                                StringComparison.OrdinalIgnoreCase));
+
+            var contentLength =
+                contentLengthHeader is null
+                    ? 0
+                    : int.Parse(
+                        contentLengthHeader[
+                            "Content-Length:".Length..].Trim());
+
+            var bodyBytes =
+                new byte[contentLength];
+
+            if (contentLength > 0)
+            {
+                await stream.ReadExactlyAsync(
+                    bodyBytes,
+                    cancellationSource.Token);
+            }
+
+            var response =
+                Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 {statusCode} Redirect\r\n" +
+                    $"Location: {redirectUri}\r\n" +
+                    "Content-Length: 0\r\n" +
+                    "Connection: close\r\n\r\n");
+
+            await stream.WriteAsync(
+                response,
+                cancellationSource.Token);
+            await stream.FlushAsync(
+                cancellationSource.Token);
+
+            return new CapturedHttpRequest(
+                headers,
+                Encoding.UTF8.GetString(bodyBytes));
         }
         catch (OperationCanceledException exception)
-            when (exception.CancellationToken == timeoutSource.Token)
+            when (cleanupToken.IsCancellationRequested)
         {
+            throw new OperationCanceledException(
+                "The source listener was stopped during test cleanup.",
+                exception,
+                cleanupToken);
+        }
+        catch (OperationCanceledException exception)
+            when (cancellationSource.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "The source listener timed out while capturing the original transaction POST.",
+                exception);
+        }
+    }
+
+    private static async Task<CapturedRedirectRequest?>
+        CaptureRedirectRequestAndRespondAsync(
+            TcpListener listener,
+            CancellationToken cancellationToken)
+    {
+        TcpClient tcpClient;
+
+        try
+        {
+            tcpClient =
+                await listener.AcceptTcpClientAsync(
+                    cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+            when (exception.CancellationToken == cancellationToken)
+        {
+            return null;
+        }
+
+        using (tcpClient)
+        {
+            using var stream =
+                tcpClient.GetStream();
+            using var responseTimeoutSource =
+                new CancellationTokenSource(
+                    TimeSpan.FromSeconds(2));
+            var requestLineBytes =
+                new List<byte>();
+            var oneByte =
+                new byte[1];
+
+            while (true)
+            {
+                var bytesRead =
+                    await stream.ReadAsync(
+                        oneByte,
+                        responseTimeoutSource.Token);
+
+                if (bytesRead == 0)
+                {
+                    throw new EndOfStreamException(
+                        "The redirect destination request ended before its request line was complete.");
+                }
+
+                if (oneByte[0] == 10)
+                {
+                    break;
+                }
+
+                if (oneByte[0] != 13)
+                {
+                    requestLineBytes.Add(oneByte[0]);
+                }
+
+                if (requestLineBytes.Count > 4096)
+                {
+                    throw new InvalidDataException(
+                        "The redirect destination request line exceeded the test server limit.");
+                }
+            }
+
+            var response =
+                Encoding.ASCII.GetBytes(
+                    "HTTP/1.1 200 OK\r\n" +
+                    "Content-Length: 0\r\n" +
+                    "Connection: close\r\n\r\n");
+
+            await stream.WriteAsync(
+                response,
+                responseTimeoutSource.Token);
+            await stream.FlushAsync(
+                responseTimeoutSource.Token);
+
+            return new CapturedRedirectRequest(
+                Encoding.ASCII.GetString(
+                    requestLineBytes.ToArray()));
         }
     }
 
     private sealed record CapturedHttpRequest(
         string Headers,
         string Body);
+
+    private sealed record CapturedRedirectRequest(
+        string RequestLine);
 
     private sealed class StubHttpClientFactory
         : IHttpClientFactory
