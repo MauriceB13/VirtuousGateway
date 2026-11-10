@@ -319,71 +319,100 @@ public sealed class PostgresVirtuousGiftProcessingLedger
         await connection.OpenAsync(
             cancellationToken);
 
-        var completedUtc =
-            DateTime.UtcNow;
-
-        await using var command =
-            connection.CreateCommand();
-
-        command.CommandText =
-            """
-            UPDATE virtuous_gift_processing
-            SET
-                status = 'Completed',
-                aplos_transaction_id = @aplosTransactionId,
-                aplos_response = @aplosResponse,
-                completed_utc = @completedUtc,
-                failure_message = NULL
-            WHERE
-                gift_id = @giftId
-                AND attempt_id = @attemptId
-                AND status = 'Processing'
-            RETURNING
-                gift_id,
-                gift_fingerprint,
-                attempt_id,
-                status,
-                aplos_transaction_id,
-                aplos_response,
-                attempt_count,
-                created_utc,
-                last_attempt_utc,
-                completed_utc,
-                failure_message;
-            """;
-
-        command.Parameters.AddWithValue(
-            "giftId",
-            giftId);
-
-        command.Parameters.AddWithValue(
-            "attemptId",
-            attemptId);
-
-        command.Parameters.AddWithValue(
-            "aplosTransactionId",
-            aplosTransactionId);
-
-        command.Parameters.AddWithValue(
-            "aplosResponse",
-            aplosResponse);
-
-        command.Parameters.AddWithValue(
-            "completedUtc",
-            completedUtc);
-
-        await using var reader =
-            await command.ExecuteReaderAsync(
+        await using var transaction =
+            await connection.BeginTransactionAsync(
                 cancellationToken);
 
-        if (!await reader.ReadAsync(
-                cancellationToken))
+        try
         {
-            throw new InvalidOperationException(
-                "The gift processing attempt is no longer active.");
-        }
+            await EnsureAplosTransactionIdAvailableAsync(
+                connection,
+                transaction,
+                giftId,
+                aplosTransactionId,
+                cancellationToken);
 
-        return ReadRecord(reader);
+            var completedUtc =
+                DateTime.UtcNow;
+
+            await using var command =
+                connection.CreateCommand();
+
+            command.Transaction =
+                transaction;
+
+            command.CommandText =
+                """
+                UPDATE virtuous_gift_processing
+                SET
+                    status = 'Completed',
+                    aplos_transaction_id = @aplosTransactionId,
+                    aplos_response = @aplosResponse,
+                    completed_utc = @completedUtc,
+                    failure_message = NULL
+                WHERE
+                    gift_id = @giftId
+                    AND attempt_id = @attemptId
+                    AND status = 'Processing'
+                RETURNING
+                    gift_id,
+                    gift_fingerprint,
+                    attempt_id,
+                    status,
+                    aplos_transaction_id,
+                    aplos_response,
+                    attempt_count,
+                    created_utc,
+                    last_attempt_utc,
+                    completed_utc,
+                    failure_message;
+                """;
+
+            command.Parameters.AddWithValue(
+                "giftId",
+                giftId);
+            command.Parameters.AddWithValue(
+                "attemptId",
+                attemptId);
+            command.Parameters.AddWithValue(
+                "aplosTransactionId",
+                aplosTransactionId);
+            command.Parameters.AddWithValue(
+                "aplosResponse",
+                aplosResponse);
+            command.Parameters.AddWithValue(
+                "completedUtc",
+                completedUtc);
+
+            VirtuousGiftProcessingRecord record;
+
+            await using (var reader =
+                await command.ExecuteReaderAsync(
+                    cancellationToken))
+            {
+                if (!await reader.ReadAsync(
+                        cancellationToken))
+                {
+                    throw new InvalidOperationException(
+                        "The gift processing attempt is no longer active.");
+                }
+
+                record =
+                    ReadRecord(reader);
+            }
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            return record;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(
+                CancellationToken.None);
+
+            throw;
+        }
     }
 
     public async Task<VirtuousGiftProcessingRecord> FailAsync(
@@ -572,6 +601,175 @@ public sealed class PostgresVirtuousGiftProcessingLedger
         return ReadRecord(reader);
     }
 
+    public async Task<bool> HasAplosTransactionIdConflictAsync(
+        long giftId,
+        long aplosTransactionId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateGiftAndTransactionIds(
+            giftId,
+            aplosTransactionId);
+
+        await EnsureDatabaseAsync(
+            cancellationToken);
+
+        await using var connection =
+            new NpgsqlConnection(
+                _connectionString);
+
+        await connection.OpenAsync(
+            cancellationToken);
+
+        await using var command =
+            connection.CreateCommand();
+
+        command.CommandText =
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM virtuous_gift_processing
+                WHERE aplos_transaction_id = @aplosTransactionId
+                    AND gift_id <> @giftId
+            );
+            """;
+
+        command.Parameters.AddWithValue(
+            "giftId",
+            giftId);
+
+        command.Parameters.AddWithValue(
+            "aplosTransactionId",
+            aplosTransactionId);
+
+        return (bool)(await command.ExecuteScalarAsync(
+            cancellationToken))!;
+    }
+
+    public async Task<VirtuousGiftProcessingRecord> ConfirmReconciledCompletedAsync(
+        long giftId,
+        Guid attemptId,
+        long aplosTransactionId,
+        string verifiedBy,
+        string verificationEvidence,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateReconciliationInputs(
+            giftId,
+            attemptId,
+            verifiedBy,
+            verificationEvidence);
+
+        if (aplosTransactionId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(aplosTransactionId),
+                "Aplos transaction ID must be greater than zero.");
+        }
+
+        await EnsureDatabaseAsync(
+            cancellationToken);
+
+        await using var connection =
+            new NpgsqlConnection(
+                _connectionString);
+
+        await connection.OpenAsync(
+            cancellationToken);
+
+        await using var transaction =
+            await connection.BeginTransactionAsync(
+                cancellationToken);
+
+        try
+        {
+            await EnsureAplosTransactionIdAvailableAsync(
+                connection,
+                transaction,
+                giftId,
+                aplosTransactionId,
+                cancellationToken);
+
+            var verifiedUtc =
+                DateTime.UtcNow;
+
+            await using var updateCommand =
+                connection.CreateCommand();
+
+            updateCommand.Transaction =
+                transaction;
+
+            updateCommand.CommandText =
+                """
+                UPDATE virtuous_gift_processing
+                SET
+                    status = 'Completed',
+                    aplos_transaction_id = @aplosTransactionId,
+                    aplos_response = NULL,
+                    completed_utc = @verifiedUtc,
+                    failure_message = NULL
+                WHERE
+                    gift_id = @giftId
+                    AND attempt_id = @attemptId
+                    AND status = 'RequiresReconciliation'
+                RETURNING
+                    gift_id,
+                    gift_fingerprint,
+                    attempt_id,
+                    status,
+                    aplos_transaction_id,
+                    aplos_response,
+                    attempt_count,
+                    created_utc,
+                    last_attempt_utc,
+                    completed_utc,
+                    failure_message;
+                """;
+
+            updateCommand.Parameters.AddWithValue(
+                "giftId",
+                giftId);
+            updateCommand.Parameters.AddWithValue(
+                "attemptId",
+                attemptId);
+            updateCommand.Parameters.AddWithValue(
+                "aplosTransactionId",
+                aplosTransactionId);
+            updateCommand.Parameters.AddWithValue(
+                "verifiedUtc",
+                verifiedUtc);
+
+            var record =
+                await ReadUpdatedRecordAsync(
+                    updateCommand,
+                    "The gift is not awaiting reconciliation for this attempt.",
+                    cancellationToken);
+
+            await InsertReconciliationAuditAsync(
+                connection,
+                transaction,
+                giftId,
+                attemptId,
+                "Completed",
+                aplosTransactionId,
+                verifiedBy,
+                verificationEvidence,
+                verifiedUtc,
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            return record;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(
+                CancellationToken.None);
+
+            throw;
+        }
+    }
+
     private async Task EnsureDatabaseAsync(
         CancellationToken cancellationToken)
     {
@@ -622,6 +820,33 @@ public sealed class PostgresVirtuousGiftProcessingLedger
             ALTER TABLE virtuous_gift_processing
                 ADD COLUMN IF NOT EXISTS gift_fingerprint TEXT NULL;
 
+            CREATE TABLE IF NOT EXISTS virtuous_gift_reconciliation_audit
+            (
+                audit_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                gift_id BIGINT NOT NULL
+                    REFERENCES virtuous_gift_processing (gift_id),
+                attempt_id UUID NOT NULL,
+                previous_status TEXT NOT NULL
+                    CHECK (previous_status = 'RequiresReconciliation'),
+                new_status TEXT NOT NULL
+                    CHECK (new_status = 'Completed'),
+                aplos_transaction_id BIGINT NULL,
+                verified_by TEXT NOT NULL
+                    CHECK (length(btrim(verified_by)) > 0),
+                verification_evidence TEXT NOT NULL
+                    CHECK (length(btrim(verification_evidence)) > 0),
+                verified_utc TIMESTAMPTZ NOT NULL,
+                CONSTRAINT ck_virtuous_gift_reconciliation_audit_transaction
+                    CHECK (
+                        (new_status = 'Completed'
+                            AND aplos_transaction_id IS NOT NULL
+                            AND aplos_transaction_id > 0)
+                    )
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_virtuous_gift_reconciliation_audit_gift
+                ON virtuous_gift_reconciliation_audit (gift_id);
+
             """;
 
         await command.ExecuteNonQueryAsync(
@@ -651,6 +876,210 @@ public sealed class PostgresVirtuousGiftProcessingLedger
 
         await command.ExecuteNonQueryAsync(
             cancellationToken);
+    }
+
+    private static async Task EnsureAplosTransactionIdAvailableAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long giftId,
+        long aplosTransactionId,
+        CancellationToken cancellationToken)
+    {
+        await using var lockCommand =
+            connection.CreateCommand();
+
+        lockCommand.Transaction =
+            transaction;
+
+        lockCommand.CommandText =
+            """
+            SELECT pg_advisory_xact_lock(@lockId);
+            """;
+
+        lockCommand.Parameters.AddWithValue(
+            "lockId",
+            long.MinValue ^ aplosTransactionId);
+
+        await lockCommand.ExecuteNonQueryAsync(
+            cancellationToken);
+
+        await using var conflictCommand =
+            connection.CreateCommand();
+
+        conflictCommand.Transaction =
+            transaction;
+
+        conflictCommand.CommandText =
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM virtuous_gift_processing
+                WHERE aplos_transaction_id = @aplosTransactionId
+                    AND gift_id <> @giftId
+            );
+            """;
+
+        conflictCommand.Parameters.AddWithValue(
+            "giftId",
+            giftId);
+        conflictCommand.Parameters.AddWithValue(
+            "aplosTransactionId",
+            aplosTransactionId);
+
+        var hasConflict =
+            (bool)(await conflictCommand.ExecuteScalarAsync(
+                cancellationToken))!;
+
+        if (hasConflict)
+        {
+            throw new AplosTransactionIdConflictException(
+                aplosTransactionId);
+        }
+    }
+
+    private static async Task<VirtuousGiftProcessingRecord> ReadUpdatedRecordAsync(
+        NpgsqlCommand command,
+        string notUpdatedMessage,
+        CancellationToken cancellationToken)
+    {
+        await using var reader =
+            await command.ExecuteReaderAsync(
+                cancellationToken);
+
+        if (!await reader.ReadAsync(
+                cancellationToken))
+        {
+            throw new InvalidOperationException(
+                notUpdatedMessage);
+        }
+
+        return ReadRecord(reader);
+    }
+
+    private static async Task InsertReconciliationAuditAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long giftId,
+        Guid attemptId,
+        string newStatus,
+        long? aplosTransactionId,
+        string verifiedBy,
+        string verificationEvidence,
+        DateTime verifiedUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var command =
+            connection.CreateCommand();
+
+        command.Transaction =
+            transaction;
+
+        command.CommandText =
+            """
+            INSERT INTO virtuous_gift_reconciliation_audit
+            (
+                gift_id,
+                attempt_id,
+                previous_status,
+                new_status,
+                aplos_transaction_id,
+                verified_by,
+                verification_evidence,
+                verified_utc
+            )
+            VALUES
+            (
+                @giftId,
+                @attemptId,
+                'RequiresReconciliation',
+                @newStatus,
+                @aplosTransactionId,
+                @verifiedBy,
+                @verificationEvidence,
+                @verifiedUtc
+            );
+            """;
+
+        command.Parameters.AddWithValue(
+            "giftId",
+            giftId);
+        command.Parameters.AddWithValue(
+            "attemptId",
+            attemptId);
+        command.Parameters.AddWithValue(
+            "newStatus",
+            newStatus);
+        command.Parameters.AddWithValue(
+            "aplosTransactionId",
+            aplosTransactionId is null
+                ? DBNull.Value
+                : aplosTransactionId.Value);
+        command.Parameters.AddWithValue(
+            "verifiedBy",
+            verifiedBy);
+        command.Parameters.AddWithValue(
+            "verificationEvidence",
+            verificationEvidence);
+        command.Parameters.AddWithValue(
+            "verifiedUtc",
+            verifiedUtc);
+
+        await command.ExecuteNonQueryAsync(
+            cancellationToken);
+    }
+
+    private static void ValidateGiftAndTransactionIds(
+        long giftId,
+        long aplosTransactionId)
+    {
+        if (giftId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(giftId),
+                "Gift ID must be greater than zero.");
+        }
+
+        if (aplosTransactionId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(aplosTransactionId),
+                "Aplos transaction ID must be greater than zero.");
+        }
+    }
+
+    private static void ValidateReconciliationInputs(
+        long giftId,
+        Guid attemptId,
+        string verifiedBy,
+        string verificationEvidence)
+    {
+        if (giftId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(giftId),
+                "Gift ID must be greater than zero.");
+        }
+
+        if (attemptId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Attempt ID cannot be empty.",
+                nameof(attemptId));
+        }
+
+        if (string.IsNullOrWhiteSpace(verifiedBy))
+        {
+            throw new ArgumentException(
+                "Verifier cannot be empty.",
+                nameof(verifiedBy));
+        }
+
+        if (string.IsNullOrWhiteSpace(verificationEvidence))
+        {
+            throw new ArgumentException(
+                "Verification evidence cannot be empty.",
+                nameof(verificationEvidence));
+        }
     }
 
     private static async Task<VirtuousGiftProcessingRecord?> GetRecordAsync(
