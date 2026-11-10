@@ -241,7 +241,7 @@ public sealed class RehearsalPolicyTests
             StringComparison.Ordinal);
         Assert.Contains("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", workflow, StringComparison.Ordinal);
         Assert.Contains("actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9", workflow, StringComparison.Ordinal);
-        Assert.Contains("dotnet-version: 8.0.427", workflow, StringComparison.Ordinal);
+        Assert.Contains("dotnet-version: 10.0.403", workflow, StringComparison.Ordinal);
         Assert.Contains("permissions:\n  contents: read", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("REVIEW_REQUIRED", workflow, StringComparison.Ordinal);
     }

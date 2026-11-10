@@ -1,6 +1,6 @@
 # VirtuousGateway
 
-VirtuousGateway is a .NET 8 API that provides a secure integration layer between
+VirtuousGateway is a .NET 10 API that provides a secure integration layer between
 Virtuous/Make and the Aplos API.
 
 ## Configuration
