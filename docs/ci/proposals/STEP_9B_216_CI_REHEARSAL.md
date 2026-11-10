@@ -99,7 +99,7 @@ independent target attestation and must not be pointed at another endpoint.
   `11bd71901bbe5b1630ceea73d27597364c9af683`.
 - `actions/setup-dotnet` v4.3.1:
   `67a3573c9a986a3f9c594539f4ab511d57bb3ce9`.
-- .NET SDK: exact version `8.0.427`, installed by the pinned setup action.
+- .NET SDK: exact version `10.0.403`, installed by the pinned setup action.
 
 The OCI digests were read from the registry manifest headers; the checkout and
 setup-dotnet SHAs resolve from their GitHub tag references. These immutable

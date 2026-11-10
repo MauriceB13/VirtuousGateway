@@ -30,7 +30,7 @@ jobs:
       - name: Install exact .NET SDK
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
-          dotnet-version: 8.0.427
+          dotnet-version: 10.0.403
       - name: Validate migration artifacts offline
         run: dotnet test tests/VirtuousGateway.MigrationValidation.Tests/VirtuousGateway.MigrationValidation.Tests.csproj --configuration Release
   rehearsal:
@@ -79,7 +79,7 @@ jobs:
       - name: Install exact .NET SDK
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
-          dotnet-version: 8.0.427
+          dotnet-version: 10.0.403
       - name: Run disposable PostgreSQL rollback rehearsal
         env:
           VG_REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
