@@ -1,6 +1,6 @@
-# V0001 offline migration validation
+# Offline migration validation
 
-This standalone test project validates the reviewed V0001 SQL and manifest without
+This standalone test project validates the reviewed V0001 and V0002 SQL and manifests without
 connecting to PostgreSQL, invoking Docker, or loading the dormant executor. It is
 intentionally not included in the solution or application test project, so ordinary
 application tests do not discover or execute migration validation.
@@ -12,10 +12,12 @@ dotnet test tests\VirtuousGateway.MigrationValidation.Tests\VirtuousGateway.Migr
 ```
 
 The suite pins the exact SQL and manifest SHA-256 values, rejects invalid SQL
-encoding/line endings, checks the manifest's unexecuted/nonautomatic state, and
-compares parsed table, column, constraint, index, and foreign-key inventories with
-an independent expected-catalog fixture. Mutation tests cover truncation, changed
-definitions, missing/duplicated/renamed objects, and altered manifest requirements.
+encoding/line endings, checks each manifest's unexecuted/nonautomatic state, and
+compares parsed schema objects with independent expected-catalog fixtures. V0002
+validates the unique B-tree index on `public.virtuous_gift_processing
+(aplos_transaction_id)` and its `IS NOT NULL` predicate; mutation tests reject
+changed table, column, uniqueness, predicate, and unexpected statements. V0001
+remains byte-pinned and unchanged.
 
 These are static artifact and model checks, not PostgreSQL parser, catalog, constraint,
 transaction, rollback, or power-loss evidence. The SQL SHA-256 pin proves only that

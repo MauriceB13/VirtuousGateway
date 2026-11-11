@@ -1,0 +1,50 @@
+{
+  "manifest_schema_version": 1,
+  "migration_version": "V0002",
+  "description": "Enforce unique non-null Aplos transaction IDs in the Virtuous gift-processing ledger",
+  "sql_file": "migrations/V0002__unique_aplos_transaction_ids.sql",
+  "sha256": "6e9adb5a875eff118df1be2d0d0d0b9952ecfe6e03f944a23cf42c0f7272e344",
+  "file_format": {
+    "encoding": "UTF-8 without BOM",
+    "line_endings": "LF",
+    "final_newline": true,
+    "checksum_input": "Exact SQL file bytes, including comments and whitespace"
+  },
+  "postgresql_baseline": {
+    "major": 17,
+    "scope": "Disposable development/test baseline; deployed version must be independently verified"
+  },
+  "schema": "public",
+  "prerequisites": [
+    "Separate explicit execution authorization",
+    "Independently attested target and dedicated migration credentials",
+    "PostgreSQL 17 with UTF8 database encoding",
+    "Verified public schema, ownership, search_path, and default privileges",
+    "Existing public.virtuous_gift_processing table with aplos_transaction_id bigint nullable",
+    "Read-only duplicate preflight and approved writer maintenance barrier",
+    "No conflicting expected index; do not infer schema from names alone",
+    "Approved executor, durable version/checksum tracking, and bounded migration lock"
+  ],
+  "transaction_mode": {
+    "mode": "single_executor_owned_transaction",
+    "transaction_wrapper_in_file": false,
+    "isolation": "read_committed",
+    "concurrent_index_builds": false,
+    "on_error": "Rollback the entire migration; resolve data conflicts only with separate authorization"
+  },
+  "automatic_execution": false,
+  "execution_status": "unexecuted",
+  "expected_objects": {
+    "indexes": [
+      "public.uq_virtuous_gift_processing_aplos_transaction_id"
+    ]
+  },
+  "excluded": [
+    "Data cleanup or transaction-ID reassignment",
+    "Runtime schema changes or automatic migration execution",
+    "Aplos posting or reconciliation",
+    "PostgreSQL rehearsal activation"
+  ],
+  "static_review_only": true,
+  "database_execution_or_parsing_performed": false
+}
