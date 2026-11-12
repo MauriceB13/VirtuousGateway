@@ -8,7 +8,241 @@ namespace VirtuousGateway.Tests.Virtuous;
 
 public sealed class VirtuousGiftServiceTests
 {
-   [Fact]
+    [Fact]
+    public async Task ReconciliationService_ConfirmPosted_CompletesGift()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        var completed =
+            await fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                70064235,
+                "operator-1",
+                "Matched Aplos transaction 70064235.");
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.Completed,
+            completed.Status);
+        Assert.Equal(
+            70064235,
+            completed.AplosTransactionId);
+    }
+
+    [Theory]
+    [InlineData("", "evidence")]
+    [InlineData("  ", "evidence")]
+    [InlineData("operator-1", "")]
+    [InlineData("operator-1", "  ")]
+    public async Task ReconciliationService_BlankOperatorOrEvidence_IsRejected(
+        string verifiedBy,
+        string evidence)
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                70064235,
+                verifiedBy,
+                evidence));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+
+        await Assert.ThrowsAsync<VirtuousGiftProcessingStateException>(
+            () => fixture.Ledger.RetryFailedAsync(
+                fixture.GiftId,
+                $"test-fingerprint-{fixture.GiftId}"));
+    }
+
+    [Fact]
+    public async Task ReconciliationService_CallerEvidenceCannotMakeAmbiguousGiftRetryable()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        const string callerSuppliedEvidence =
+            "I could not find a matching Aplos transaction.";
+
+        await Assert.ThrowsAsync<VirtuousGiftProcessingStateException>(
+            () => fixture.Ledger.RetryFailedAsync(
+                fixture.GiftId,
+                callerSuppliedEvidence));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_WrongAttempt_IsRejected()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                Guid.NewGuid(),
+                70064235,
+                "operator-1",
+                "Matched Aplos transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_WrongCurrentStatus_IsRejected()
+    {
+        var ledger =
+            new InMemoryVirtuousGiftProcessingLedger();
+
+        var claim =
+            await ledger.BeginProcessingAsync(
+                12345,
+                "test-fingerprint");
+
+        var service =
+            new VirtuousGiftReconciliationService(ledger);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ConfirmPostedAsync(
+                12345,
+                claim.Record.AttemptId,
+                70064235,
+                "operator-1",
+                "Matched Aplos transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.Processing,
+            ledger.GetRecord(12345).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_DuplicateDecision_IsRejected()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        await fixture.Service.ConfirmPostedAsync(
+            fixture.GiftId,
+            fixture.AttemptId,
+            70064235,
+            "operator-1",
+            "Matched Aplos transaction.");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                70064235,
+                "operator-2",
+                "Repeated decision."));
+    }
+
+    [Fact]
+    public async Task ReconciliationService_WrongGift_IsRejected()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId + 1,
+                fixture.AttemptId,
+                70064235,
+                "operator-1",
+                "Matched Aplos transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_NonPositiveTransactionId_IsRejected()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                0,
+                "operator-1",
+                "Matched Aplos transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_ConflictingTransactionId_IsRejected()
+    {
+        var ledger =
+            new InMemoryVirtuousGiftProcessingLedger();
+
+        var posted =
+            await ledger.BeginProcessingAsync(
+                10001,
+                "posted-gift");
+
+        await ledger.CompleteAsync(
+            10001,
+            posted.Record.AttemptId,
+            70064235,
+            """{"id":70064235}""");
+
+        var fixture =
+            await CreateReconciliationFixtureAsync(
+                ledger,
+                giftId: 10002);
+
+        await Assert.ThrowsAsync<AplosTransactionIdConflictException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                70064235,
+                "operator-1",
+                "Matched transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationService_LedgerFailure_DoesNotReturnSuccessfulDecision()
+    {
+        var fixture =
+            await CreateReconciliationFixtureAsync();
+
+        fixture.Ledger.FailNextReconciliation =
+            true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.ConfirmPostedAsync(
+                fixture.GiftId,
+                fixture.AttemptId,
+                70064235,
+                "operator-1",
+                "Matched Aplos transaction."));
+
+        Assert.Equal(
+            VirtuousGiftProcessingStatus.RequiresReconciliation,
+            fixture.Ledger.GetRecord(fixture.GiftId).Status);
+    }
+
+    [Fact]
     public async Task ProcessGiftAsync_UnexpectedTransactionFailure_RequiresReconciliationAndDoesNotRetryDuplicate()
     {
         var transaction =
@@ -1241,6 +1475,34 @@ public async Task RetryFailedGiftAsync_FailedGift_RetriesAndCompletes()
             }
         }
     
+    private static async Task<(
+        InMemoryVirtuousGiftProcessingLedger Ledger,
+        VirtuousGiftReconciliationService Service,
+        long GiftId,
+        Guid AttemptId)> CreateReconciliationFixtureAsync(
+            InMemoryVirtuousGiftProcessingLedger? ledger = null,
+            long giftId = 12345)
+    {
+        ledger ??=
+            new InMemoryVirtuousGiftProcessingLedger();
+
+        var claim =
+            await ledger.BeginProcessingAsync(
+                giftId,
+                $"test-fingerprint-{giftId}");
+
+        await ledger.RequireReconciliationAsync(
+            giftId,
+            claim.Record.AttemptId,
+            "Aplos transaction outcome is unknown.");
+
+        return (
+            ledger,
+            new VirtuousGiftReconciliationService(ledger),
+            giftId,
+            claim.Record.AttemptId);
+    }
+
     private sealed class StubMapper
         : IVirtuousGiftTransactionMapper
     {
@@ -1405,6 +1667,11 @@ private sealed class RejectingTransactionService
     private readonly Dictionary<
         long,
         VirtuousGiftProcessingRecord> _records = new();
+
+    public bool FailNextReconciliation { get; set; }
+
+    public VirtuousGiftProcessingRecord GetRecord(long giftId) =>
+        _records[giftId];
 
     public Task<VirtuousGiftProcessingClaim> BeginProcessingAsync(
     long giftId,
@@ -1637,6 +1904,121 @@ private sealed class RejectingTransactionService
 
         return Task.FromResult(
             reconciliation);
+    }
+
+    public Task<bool> HasAplosTransactionIdConflictAsync(
+        long giftId,
+        long aplosTransactionId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(
+            _records.Values.Any(
+                record =>
+                    record.GiftId != giftId
+                    && record.AplosTransactionId == aplosTransactionId));
+
+    public Task<VirtuousGiftProcessingRecord> ConfirmReconciledCompletedAsync(
+        long giftId,
+        Guid attemptId,
+        long aplosTransactionId,
+        string verifiedBy,
+        string verificationEvidence,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateReconciliation(
+            giftId,
+            attemptId,
+            verifiedBy,
+            verificationEvidence);
+
+        if (aplosTransactionId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(aplosTransactionId));
+        }
+
+        if (FailNextReconciliation)
+        {
+            FailNextReconciliation = false;
+            throw new InvalidOperationException(
+                "Simulated audit persistence failure.");
+        }
+
+        var current =
+            GetReconciliationAttempt(
+                giftId,
+                attemptId);
+
+        var completed =
+            new VirtuousGiftProcessingRecord
+            {
+                GiftId = current.GiftId,
+                GiftFingerprint = current.GiftFingerprint,
+                AttemptId = current.AttemptId,
+                Status = VirtuousGiftProcessingStatus.Completed,
+                AplosTransactionId = aplosTransactionId,
+                AttemptCount = current.AttemptCount,
+                CreatedUtc = current.CreatedUtc,
+                LastAttemptUtc = current.LastAttemptUtc,
+                CompletedUtc = DateTime.UtcNow
+            };
+
+        _records[giftId] =
+            completed;
+
+        return Task.FromResult(
+            completed);
+    }
+
+    private static void ValidateReconciliation(
+        long giftId,
+        Guid attemptId,
+        string verifiedBy,
+        string verificationEvidence)
+    {
+        if (giftId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(giftId));
+        }
+
+        if (attemptId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Attempt ID cannot be empty.",
+                nameof(attemptId));
+        }
+
+        if (string.IsNullOrWhiteSpace(verifiedBy))
+        {
+            throw new ArgumentException(
+                "Verifier cannot be empty.",
+                nameof(verifiedBy));
+        }
+
+        if (string.IsNullOrWhiteSpace(verificationEvidence))
+        {
+            throw new ArgumentException(
+                "Verification evidence cannot be empty.",
+                nameof(verificationEvidence));
+        }
+    }
+
+    private VirtuousGiftProcessingRecord GetReconciliationAttempt(
+        long giftId,
+        Guid attemptId)
+    {
+        if (!_records.TryGetValue(
+                giftId,
+                out var record)
+            || record.AttemptId != attemptId
+            || record.Status !=
+                VirtuousGiftProcessingStatus.RequiresReconciliation)
+        {
+            throw new InvalidOperationException(
+                "The gift is not awaiting reconciliation for this attempt.");
+        }
+
+        return record;
     }
 
     private VirtuousGiftProcessingRecord GetActiveAttempt(

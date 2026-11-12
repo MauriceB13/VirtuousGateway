@@ -30,4 +30,18 @@ public interface IVirtuousGiftProcessingLedger
         Guid attemptId,
         string failureMessage,
         CancellationToken cancellationToken = default);
+
+    Task<bool> HasAplosTransactionIdConflictAsync(
+        long giftId,
+        long aplosTransactionId,
+        CancellationToken cancellationToken = default);
+
+    Task<VirtuousGiftProcessingRecord> ConfirmReconciledCompletedAsync(
+        long giftId,
+        Guid attemptId,
+        long aplosTransactionId,
+        string verifiedBy,
+        string verificationEvidence,
+        CancellationToken cancellationToken = default);
+
 }

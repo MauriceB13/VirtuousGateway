@@ -106,6 +106,9 @@ public static class ServiceCollectionExtensions
     IVirtuousGiftService,
     VirtuousGiftService>();
 
+    services.AddScoped<
+        VirtuousGiftReconciliationService>();
+
     services.AddSingleton<
     AplosTransactionResponseParser>();
 
