@@ -1,0 +1,25 @@
+{
+  "postgresqlMajor": 17,
+  "databaseEncoding": "UTF8",
+  "schema": "public",
+  "newTableRowsAfterCreate": 0,
+  "prerequisite": {
+    "table": "virtuous_gift_processing",
+    "column": "aplos_transaction_id",
+    "type": "bigint",
+    "primaryKeyRequired": false
+  },
+  "tables": [],
+  "indexes": [
+    {
+      "name": "uq_virtuous_gift_processing_aplos_transaction_id",
+      "definitionSha256": "c99860046254bc0433ddfdf1ccc0c037c1f54fb91bfd6d9dc039046ca17e2b2c",
+      "table": "virtuous_gift_processing",
+      "unique": true,
+      "method": "btree",
+      "columns": ["aplos_transaction_id"],
+      "predicateRequired": true
+    }
+  ],
+  "foreignKeys": []
+}

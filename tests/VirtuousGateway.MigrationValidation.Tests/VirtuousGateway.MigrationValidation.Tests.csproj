@@ -15,7 +15,12 @@
           Link="artifacts\V0001.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\database\postgresql\manifests\V0001.json"
           Link="artifacts\V0001.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\database\postgresql\migrations\V0002__unique_aplos_transaction_ids.sql"
+          Link="artifacts\V0002.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\database\postgresql\manifests\V0002.json"
+          Link="artifacts\V0002.manifest.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="expected-catalog-v0001.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="expected-catalog-v0002.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\VirtuousGateway.sln"
           Link="boundary\VirtuousGateway.sln" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\VirtuousGateway.Api\VirtuousGateway.Api.csproj"
