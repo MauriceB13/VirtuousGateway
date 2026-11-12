@@ -39,8 +39,7 @@ public sealed class VirtuousGiftReconciliationService
                 aplosTransactionId,
                 cancellationToken))
         {
-            throw new AplosTransactionIdConflictException(
-                aplosTransactionId);
+            throw new AplosTransactionIdConflictException();
         }
 
         return await _processingLedger.ConfirmReconciledCompletedAsync(

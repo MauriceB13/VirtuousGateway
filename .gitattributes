@@ -1,2 +1,4 @@
 /database/postgresql/migrations/V0001__add_accounting_operation_receipt_evidence.sql text eol=lf
 /database/postgresql/manifests/V0001.json text eol=lf
+/database/postgresql/migrations/V0002__unique_aplos_transaction_ids.sql text eol=lf
+/database/postgresql/manifests/V0002.json text eol=lf

@@ -6,7 +6,14 @@ public sealed class AplosTransactionIdConflictException : InvalidOperationExcept
         : base(
             $"Aplos transaction ID {aplosTransactionId} is already assigned to another gift.")
     {
-        AplosTransactionId = aplosTransactionId;
+        AplosTransactionId =
+            aplosTransactionId;
+    }
+
+    public AplosTransactionIdConflictException()
+        : base(
+            "An Aplos transaction ID conflict requires reconciliation.")
+    {
     }
 
     public long AplosTransactionId { get; }

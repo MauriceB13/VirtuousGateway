@@ -406,6 +406,15 @@ public sealed class PostgresVirtuousGiftProcessingLedger
 
             return record;
         }
+        catch (PostgresException exception)
+        {
+            await PostgresAplosTransactionIdConflictTranslator
+                .RollbackAndTranslateAsync(
+                    exception,
+                    () => transaction.RollbackAsync(
+                        CancellationToken.None));
+            throw;
+        }
         catch
         {
             await transaction.RollbackAsync(
@@ -761,6 +770,15 @@ public sealed class PostgresVirtuousGiftProcessingLedger
 
             return record;
         }
+        catch (PostgresException exception)
+        {
+            await PostgresAplosTransactionIdConflictTranslator
+                .RollbackAndTranslateAsync(
+                    exception,
+                    () => transaction.RollbackAsync(
+                        CancellationToken.None));
+            throw;
+        }
         catch
         {
             await transaction.RollbackAsync(
@@ -932,8 +950,7 @@ public sealed class PostgresVirtuousGiftProcessingLedger
 
         if (hasConflict)
         {
-            throw new AplosTransactionIdConflictException(
-                aplosTransactionId);
+            throw new AplosTransactionIdConflictException();
         }
     }
 
