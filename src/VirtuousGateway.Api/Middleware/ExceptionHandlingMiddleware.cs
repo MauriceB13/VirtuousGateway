@@ -25,11 +25,28 @@ public sealed class ExceptionHandlingMiddleware
         }
         catch (Exception exception)
         {
-            _logger.LogError(
-                exception,
-                "Unhandled exception processing {Method} {Path}",
-                context.Request.Method,
-                context.Request.Path);
+            if (exception is AplosTransactionConflictReconciliationException)
+            {
+                _logger.LogError(
+                    "Gift requires operator investigation after an Aplos transaction conflict. Classification={Classification} TraceId={TraceId}",
+                    "APLOS_TRANSACTION_CONFLICT_RECONCILIATION_REQUIRED",
+                    context.TraceIdentifier);
+            }
+            else if (exception is AplosTransactionIdConflictException)
+            {
+                _logger.LogWarning(
+                    "Aplos transaction ID conflict requires reconciliation. Classification={Classification} TraceId={TraceId}",
+                    "APLOS_TRANSACTION_ID_UNIQUE_CONFLICT",
+                    context.TraceIdentifier);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception,
+                    "Unhandled exception processing {Method} {Path}",
+                    context.Request.Method,
+                    context.Request.Path);
+            }
 
             await HandleExceptionAsync(
             context,
@@ -75,6 +92,28 @@ public sealed class ExceptionHandlingMiddleware
         {
             error = fingerprintException.Message,
             giftId = fingerprintException.GiftId,
+            traceId = context.TraceIdentifier
+        };
+    }
+    else if (exception is AplosTransactionIdConflictException)
+    {
+        context.Response.StatusCode =
+            (int)HttpStatusCode.Conflict;
+
+        response = new
+        {
+            error = "An Aplos transaction ID conflict requires reconciliation.",
+            traceId = context.TraceIdentifier
+        };
+    }
+    else if (exception is AplosTransactionConflictReconciliationException)
+    {
+        context.Response.StatusCode =
+            (int)HttpStatusCode.InternalServerError;
+
+        response = new
+        {
+            error = "Gift processing requires operator investigation.",
             traceId = context.TraceIdentifier
         };
     }

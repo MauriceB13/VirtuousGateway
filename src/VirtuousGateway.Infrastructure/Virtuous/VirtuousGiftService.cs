@@ -186,12 +186,32 @@ public sealed class VirtuousGiftService
                 exception);
         }
 
-        await _processingLedger.CompleteAsync(
-            gift.Id,
-            claim.Record.AttemptId,
-            result.AplosTransactionId,
-            rawResult,
-            cancellationToken);
+        try
+        {
+            await _processingLedger.CompleteAsync(
+                gift.Id,
+                claim.Record.AttemptId,
+                result.AplosTransactionId,
+                rawResult,
+                cancellationToken);
+        }
+        catch (AplosTransactionIdConflictException)
+        {
+            try
+            {
+                await _processingLedger.RequireReconciliationAsync(
+                    gift.Id,
+                    claim.Record.AttemptId,
+                    "The Aplos transaction may have been posted, but its transaction ID could not be recorded uniquely.",
+                    cancellationToken);
+            }
+            catch (Exception)
+            {
+                throw new AplosTransactionConflictReconciliationException();
+            }
+
+            throw;
+        }
 
         return result;
     }
